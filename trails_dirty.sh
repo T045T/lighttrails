@@ -1,5 +1,5 @@
 #!/bin/bash
-#set -x
+# set -x
 set -e
 set -o nounset
 set -o pipefail
@@ -22,18 +22,7 @@ DARKEN_BLACK_FRAMES_PERCENTAGE=${3:-0}
 ffmpeg -i $VIDEO_IN ${TEMP}/out-%d.png
 cd ${TEMP}
 NUMBEROFFRAMES=$(ls out-*.png | wc -l)
-# Convert all frames into near blackness. Choose the threshold value to black out everything but the light trail.
-# out-n.png -> black-n.png
-echo 'Converting to "light trail only" pictures...'
-if ! [ -x "$(command -v parallel)" ]; then
-    echo "Using for loop"
-    # Fall back to for loop
-    for i in out-*.png; do convert -black-threshold 50% -brightness-contrast -${DARKEN_BLACK_FRAMES_PERCENTAGE}% $i $(echo $i | sed 's/out/black/'); done
-else
-    echo "Using GNU parallel"
-    # This launches as many parallel convert instances as you have cores
-    ls | grep out- | parallel "convert -black-threshold 50% -brightness-contrast -${DARKEN_BLACK_FRAMES_PERCENTAGE}% "'{} {= s:out:black: =}'
-fi
+
 
 echo 'Done.'
 
@@ -54,7 +43,7 @@ EOF
 FINAL_DARKENING=$((100-${STEPSIZE}))
 
 # Initialize rolling-window.png to a black image - darkening that won't hurt.
-convert  black-1.png -threshold 100% -alpha off rolling-window.png
+convert  out-1.png -threshold 100% -alpha off rolling-window.png
 
 # Iterate over all frames, cheating with the start number, so I don't have to add extra handling for the first few frames.
 echo "Creating light trails for $NUMBEROFFRAMES frames:"
@@ -67,16 +56,19 @@ do
     #
     # Backtick comments are a neat way to comment multi-line commands!
     convert -respect-parentheses \
+            `# calculate light trail only frame` \
+            \( out-${FRAME}.png -black-threshold 50% -brightness-contrast -${DARKEN_BLACK_FRAMES_PERCENTAGE}% -write mpr:BLACK \) \
             `# darken the window` \
             \( rolling-window.png -brightness-contrast -${STEPSIZE}% -write mpr:X \) \
             `# Add the rolling window (containing the "black-" versions of Frames FRAME-TAIL to FRAME-1)` \
             `# to the current frame` \
             \( out-${FRAME}.png mpr:X -compose Screen -composite -write fused-${FRAME}.png \) \
             `# add the next "black" frame to the rolling window` \
-            \( black-${FRAME}.png mpr:X -compose Screen -composite -write rolling-window.png \) \
+            \( mpr:BLACK mpr:X -compose Screen -composite -write rolling-window.png \) \
             null:
 done
 echo 'Done.'
+# yuv420p pixel format to ensure the resulting clip plays back in non-ffmpeg players
 ffmpeg -i fused-%d.png -pix_fmt yuv420p ${CURDIR}/${VIDEO_OUT}
 cd ${CURDIR}
 echo $TEMP
